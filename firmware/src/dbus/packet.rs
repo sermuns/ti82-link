@@ -61,7 +61,7 @@ impl Packet {
         Ok(())
     }
 
-    pub fn receive<D0, D1>(dbus: &mut DBus<D0, D1>, timeout_ms: u16) -> Result<Self, DBusError>
+    pub fn receive<D0, D1>(dbus: &mut DBus<D0, D1>, timeout_ms: u32) -> Result<Self, DBusError>
     where
         D0: PinOps,
         D1: PinOps,

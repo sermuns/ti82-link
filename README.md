@@ -40,7 +40,7 @@ cargo run -p ti82-cli -- send B -- -123  # negative numbers
 3. Run CLI command within 5 seconds
 4. Variable appears on calculator
 
-**Note:** If variable exists, calculator shows overwrite prompt (65 second timeout).
+**Note:** If variable exists, calculator shows overwrite prompt (10 minute timeout).
 
 ## What Works
 

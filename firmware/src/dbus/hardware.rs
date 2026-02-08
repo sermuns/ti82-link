@@ -39,7 +39,7 @@ where
         Ok(())
     }
 
-    pub fn receive_bit(&mut self, timeout_ms: u16) -> Result<bool, DBusError> {
+    pub fn receive_bit(&mut self, timeout_ms: u32) -> Result<bool, DBusError> {
         for _ in 0..timeout_ms {
             let d0_high = self.d0.is_high();
             let d1_high = self.d1.is_high();
@@ -71,7 +71,7 @@ where
         Ok(())
     }
 
-    pub fn receive_byte(&mut self, timeout_ms: u16) -> Result<u8, DBusError> {
+    pub fn receive_byte(&mut self, timeout_ms: u32) -> Result<u8, DBusError> {
         let mut byte = 0u8;
         for i in 0..8 {
             if self.receive_bit(timeout_ms)? {
@@ -97,7 +97,7 @@ where
         self.d1.set_high();
     }
 
-    fn wait_for_d0_low(&self, timeout_ms: u16) -> Result<(), DBusError> {
+    fn wait_for_d0_low(&self, timeout_ms: u32) -> Result<(), DBusError> {
         for _ in 0..timeout_ms {
             if self.d0.is_low() {
                 return Ok(());
@@ -107,7 +107,7 @@ where
         Err(DBusError::Timeout)
     }
 
-    fn wait_for_d0_high(&self, timeout_ms: u16) -> Result<(), DBusError> {
+    fn wait_for_d0_high(&self, timeout_ms: u32) -> Result<(), DBusError> {
         for _ in 0..timeout_ms {
             if self.d0.is_high() {
                 return Ok(());
@@ -117,7 +117,7 @@ where
         Err(DBusError::Timeout)
     }
 
-    fn wait_for_d1_low(&self, timeout_ms: u16) -> Result<(), DBusError> {
+    fn wait_for_d1_low(&self, timeout_ms: u32) -> Result<(), DBusError> {
         for _ in 0..timeout_ms {
             if self.d1.is_low() {
                 return Ok(());
@@ -127,7 +127,7 @@ where
         Err(DBusError::Timeout)
     }
 
-    fn wait_for_d1_high(&self, timeout_ms: u16) -> Result<(), DBusError> {
+    fn wait_for_d1_high(&self, timeout_ms: u32) -> Result<(), DBusError> {
         for _ in 0..timeout_ms {
             if self.d1.is_high() {
                 return Ok(());

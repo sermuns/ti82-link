@@ -231,7 +231,7 @@ where
     // Step 3: Wait for CTS (long timeout for overwrite dialog)
     {
         ufmt::uwriteln!(serial, "S3: Wait CTS\r").ok();
-        let cts = Packet::receive(dbus, 65535)?;
+        let cts = Packet::receive(dbus, 600000)?;
         if cts.command_id != CMD_CTS {
             ufmt::uwriteln!(serial, "ERR: got {:02X}\r", cts.command_id).ok();
             return Err(dbus::hardware::DBusError::LinkError);
