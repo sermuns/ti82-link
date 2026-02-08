@@ -1,156 +1,162 @@
-# Session Summary - TI-82 Link Debugging
+# Session Summary - TI-82 Link Project
 
-## What Happened
+## Current Status (2026-02-08)
 
-When you ran `cargo r -- -v get A`, the CLI wasn't receiving responses from the firmware. I debugged and fixed multiple issues, then discovered a **hardware problem**.
+### What Works ✅
+- **Real variable silent fetch**: `cargo run -p ti82-cli -- get A` works perfectly
+- **Real variable send**: `cargo run -p ti82-cli -- send A 42` works
+- Hardware is properly connected (D0 and D1 both HIGH when idle)
+- Firmware and CLI are working correctly for real number operations
 
-## Issues Found & Fixed
+### What's Broken ❌
+- **Program receive**: `cargo run -p ti82-cli -- get-program COSRULE` fails
+  - Protocol completes REQ/ACK/VAR/ACK/CTS/ACK sequence
+  - Program size detected correctly (297 bytes)
+  - **Fails at DATA packet step** - times out waiting for DATA
+  - See `ISSUES.md` for detailed analysis
 
-### 1. CLI Not Reading Responses ✅ FIXED
-**Problem:** CLI was timing out immediately or reading startup messages instead of actual responses.
+## Latest Session Work
 
-**Fixes made:**
-- Added 2-second boot delay (Arduino resets when serial connects)
-- Clear input buffer after boot
-- Skip startup messages, wait for "Requesting variable:" before recording
-- Increased timeout to 30 seconds
-- Better activity-based timeout (2 seconds of no data after receiving something)
+### Attempted: Add Program Receive Functionality
+1. Added `get-program` CLI command
+2. Added `request_program()` firmware function (separate from working `request_variable()`)
+3. Tested - **doesn't work**
+4. Debugged output shows protocol mostly working but fails at final DATA step
 
-### 2. Startup Message Confusion ✅ FIXED
-**Problem:** CLI was treating Arduino's boot messages as command responses.
+### Key Learning: Don't Break Working Code
+- Initial attempt refactored `request_variable()` into generic function
+- This broke the working real variable functionality
+- **Solution**: Reverted changes, added `request_program()` as separate function
+- Real variable fetch still works after revert
 
-**Fix:** Modified `read_all_response()` to mark startup messages as `[skipped]` and only record lines after seeing "Requesting variable:".
+### Files Modified (Committed)
+- `firmware/src/main.rs`: Added 'P' command handler + `request_program()` function
+- `cli/src/main.rs`: Added `GetProgram` command with hex dump display
+- `ISSUES.md`: Created - documents broken program receive with full debug output
+- `README.md`: Added strong warning about experimental code quality
 
-### 3. Command Sending ✅ WORKING
-- Status command works: `cargo r -p ti82-cli -- status`
-- Get command reaches firmware: `cargo r -p ti82-cli -- -v get A`
-- Firmware receives commands correctly
+## Repository Structure
 
-### 4. Hardware Issue Discovered ⚠️ NEEDS YOUR ATTENTION
+```
+ti82-tools/
+├── firmware/           # Arduino Rust (no_std)
+│   ├── src/
+│   │   ├── main.rs                    # Commands: R, P, S, MR
+│   │   ├── dbus/
+│   │   │   ├── hardware.rs            # Low-level D-BUS protocol
+│   │   │   ├── packet.rs              # Packet send/receive
+│   │   │   └── mod.rs
+│   │   └── protocol/
+│   │       ├── commands.rs            # CMD_VAR, CMD_REQ, etc.
+│   │       ├── variables.rs           # VariableHeader struct
+│   │       ├── encoding.rs            # BCD encoding/decoding
+│   │       └── mod.rs
+│   └── Cargo.toml
+└── cli/                # PC Rust tool (std)
+    ├── src/main.rs     # Commands: status, get, get-program, send
+    └── Cargo.toml
+```
 
-## Current Problem: D1 Pin Stuck LOW
+## Hardware Setup (Working)
 
-Running the status command shows:
+**Wiring:**
+```
+TI-82 Jack      Arduino Nano
+────────────────────────────
+Tip (D0)    →   D2 + 10kΩ to 5V
+Ring (D1)   →   D3 + 10kΩ to 5V  
+Sleeve      →   GND
+```
+
+**Status Check:**
 ```bash
-$ cargo r -p ti82-cli -- status
-STATUS: BUSY (D0=true D1=false)
+$ cargo run -p ti82-cli -- status
+STATUS: IDLE (D0=true D1=true)  # Both HIGH = correct
 ```
 
-**What this means:**
-- D0 (Red wire, A0): ✅ HIGH - Working correctly
-- D1 (White wire, A1): ❌ LOW - **Missing pull-up resistor or short to ground**
-
-## What You Need to Check
-
-### Critical: Pull-up Resistors Required!
-
-The TI-82 link protocol requires **both** lines to be HIGH when idle. This is done with 10kΩ resistors:
-
-```
-A0 ──[10kΩ resistor]── 5V  ← D0 (Red)
-A1 ──[10kΩ resistor]── 5V  ← D1 (White)
-```
-
-### Action Items
-
-1. **Check if you have a 10kΩ resistor on A1:**
-   - One leg connected to Arduino pin A1
-   - Other leg connected to Arduino 5V pin
-
-2. **If no resistor on A1:**
-   - Add a 10kΩ resistor (color: Brown-Black-Orange-Gold)
-   - Connect between A1 and 5V
-
-3. **If resistor exists:**
-   - Check connections are firm
-   - Test resistor with multimeter (should read ~10kΩ)
-   - Check for short to ground on white wire
-
-4. **After fixing, test again:**
-   ```bash
-   cargo r -p ti82-cli -- status
-   ```
-   Should show: `STATUS: IDLE (D0=true D1=true)`
-
-## Files Updated
-
-### Firmware Changes
-- `firmware/src/main.rs`: Added pin state diagnostics to status command
-- `firmware/src/dbus/hardware.rs`: Added `get_pin_states()` method
-- **Firmware has been flashed to your Arduino**
-
-### CLI Changes
-- `cli/src/main.rs`: 
-  - Added 2-second boot delay
-  - Skip startup messages
-  - Wait for actual response
-  - Added verbose output showing `[skipped]` messages
-- **CLI has been compiled and ready to use**
-
-## Documentation Created
-
-- **TROUBLESHOOTING.md**: Comprehensive hardware debugging guide
-  - How to test pin states
-  - How to verify pull-up resistors
-  - How to check for shorts
-  - Step-by-step troubleshooting
-
-## How to Test When Fixed
+## Quick Command Reference
 
 ```bash
-# Step 1: Verify hardware (should show IDLE with both pins HIGH)
-cargo r -p ti82-cli -- status
+# Flash firmware
+cd firmware && cargo run --release
 
-# Step 2: Store a value on calculator
-# On TI-82: 42 → A
+# Check hardware status
+cargo run -p ti82-cli -- status
 
-# Step 3: Request the variable
-cargo r -p ti82-cli -- -v get A
+# Get real variable (silent - no SEND mode needed)
+cargo run -p ti82-cli -- get A
 
-# Expected output:
-# Waiting for Arduino to boot...
-# Sending command...
-# ← Requesting variable: A
-# ← Sending REQ...
-# ← Waiting for ACK...
-# ... (protocol messages)
-# ← Transfer complete!
-# ← OK
-# Variable A: 42.0
+# Send real variable (calculator must be in RECEIVE mode)
+cargo run -p ti82-cli -- send A 42
+
+# Get program (BROKEN - documented in ISSUES.md)
+cargo run -p ti82-cli -- get-program HELLO
 ```
 
-## Current Status
+## Protocol Details
 
-✅ Software working correctly
-✅ Communication between CLI and firmware working
-✅ Diagnostics added to identify hardware issues
-⚠️ **Hardware issue detected: D1 (A1) missing pull-up resistor**
+### Working: Real Number Receive (Silent Fetch)
+1. PC sends REQ packet with real variable header (type 0x00)
+2. Calculator responds with ACK
+3. Calculator sends VAR packet with variable info
+4. PC sends ACK
+5. PC sends CTS (Clear To Send)
+6. Calculator sends ACK
+7. Calculator sends DATA packet (9 bytes for real numbers)
+8. PC sends final ACK
+9. **Works perfectly** - fetches silently from home screen
 
-**Next step:** Add or fix 10kΩ pull-up resistor on A1 to 5V, then test again!
+### Broken: Program Receive
+1. PC sends REQ packet with program header (type 0x05)
+2. Calculator responds with ACK
+3. Calculator sends VAR packet with program info ✅
+4. PC sends ACK ✅
+5. PC sends CTS ✅
+6. Calculator sends ACK ✅
+7. **Calculator never sends DATA packet** ❌ - timeout after 30s
+8. Unknown why - see ISSUES.md for investigation ideas
 
-## Quick Reference Commands
+## Important Files for Next Session
 
+- **ISSUES.md** - Current problem documentation
+- **README.md** - Usage instructions + experimental code warning
+- **TROUBLESHOOTING.md** - Hardware debugging guide
+- **firmware/src/main.rs** - Arduino firmware with R, P, S, MR commands
+- **cli/src/main.rs** - PC tool commands
+
+## Git Status
+
+```
+Branch: main
+Last commit: 1dbeceb "wip: add broken program receive functionality"
+Status: Pushed to origin
+```
+
+## Next Steps (If Continuing)
+
+To fix program receive:
+1. Test with calculator in explicit SEND mode (not silent fetch)
+2. Increase DATA timeout from 5000ms to longer
+3. Check TI-82 link protocol spec for program vs real differences
+4. Capture actual D-BUS traffic to see what calculator does
+5. Try different type IDs or header structures for programs
+
+## Important Notes
+
+⚠️ **This is experimental vibe-coded slop**
+- Minimal error handling
+- Protocol tuned by trial and error
+- Works by luck more than design
+- DO NOT TRUST for important data
+
+📝 **Commit Style**
+- Lowercase, imperative: "fix decimal parsing bug"
+- No descriptions, just one line
+- Example: `git commit -m "add program receive functionality"`
+
+🔧 **Testing After Changes**
+Always verify real variable fetch still works:
 ```bash
-# Check pin states
-cargo r -p ti82-cli -- status
-
-# Get variable with verbose output
-cargo r -p ti82-cli -- -v get A
-
-# Get variable (clean output)
-cargo r -p ti82-cli -- get A
+cargo run -p ti82-cli -- get A
 ```
-
-## Expected Working Output
-
-When hardware is fixed, you should see:
-
-```
-$ cargo r -p ti82-cli -- status
-STATUS: IDLE (D0=true D1=true)
-
-$ cargo r -p ti82-cli -- get A
-Variable A: 42.0
-```
-
-See TROUBLESHOOTING.md for detailed debugging steps!
+If this breaks, you've introduced a regression!
