@@ -19,7 +19,9 @@ fn parse_ti82_real(bytes: &[u8]) -> Option<f64> {
         mantissa = mantissa * 100 + high * 10 + low;
     }
 
-    let mut value = mantissa as f64 / 1e14;
+    // TI format: mantissa has implicit decimal after first digit
+    // So 42000000000000 represents 4.2, and we multiply by 10^exponent
+    let mut value = mantissa as f64 / 1e13;
 
     if exponent != 0 {
         value *= 10f64.powi(exponent as i32);
