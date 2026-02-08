@@ -33,16 +33,12 @@ fn main() -> ! {
         led.toggle();
         arduino_hal::delay_ms(500);
 
-        let Ok(byte) = nb::block!(serial.read()) else {
-            continue;
-        };
+        let byte = nb::block!(serial.read()).unwrap_infallible();
 
         match byte {
             b'R' => {
                 // Request variable (receive FROM calculator)
-                let Ok(name_char) = nb::block!(serial.read()) else {
-                    continue;
-                };
+                let name_char = nb::block!(serial.read()).unwrap_infallible();
 
                 ufmt::uwriteln!(&mut serial, "Requesting variable: {}\r", name_char as char)
                     .unwrap_infallible();
@@ -78,9 +74,7 @@ fn main() -> ! {
                 // Manual send variable (send TO calculator)
                 // Format: M<type><name/data>
                 // Types: R=real, L=list, S=string, P=program
-                let Ok(type_char) = nb::block!(serial.read()) else {
-                    continue;
-                };
+                let type_char = nb::block!(serial.read()).unwrap_infallible();
 
                 match type_char {
                     b'R' => {
@@ -223,7 +217,6 @@ where
         ufmt::uwriteln!(serial, "S1: Sending VAR\r").ok();
         var_packet.send(dbus)?;
     }
-    arduino_hal::delay_ms(200);
 
     // Step 2: Wait for ACK
     {
@@ -234,12 +227,11 @@ where
             return Err(dbus::hardware::DBusError::LinkError);
         }
     }
-    arduino_hal::delay_ms(200);
 
-    // Step 3: Wait for CTS
+    // Step 3: Wait for CTS (long timeout for overwrite dialog)
     {
         ufmt::uwriteln!(serial, "S3: Wait CTS\r").ok();
-        let cts = Packet::receive(dbus, 5000)?;
+        let cts = Packet::receive(dbus, 60000)?;
         if cts.command_id != CMD_CTS {
             ufmt::uwriteln!(serial, "ERR: got {:02X}\r", cts.command_id).ok();
             return Err(dbus::hardware::DBusError::LinkError);
@@ -261,7 +253,6 @@ where
         let data_packet = Packet::with_data(MACHINE_ID_COMPUTER, CMD_DATA, &real_data);
         data_packet.send(dbus)?;
     }
-    arduino_hal::delay_ms(50);
 
     // Step 6: Wait for final ACK
     {
@@ -280,7 +271,6 @@ where
         let eot = Packet::new(MACHINE_ID_COMPUTER, CMD_EOT);
         eot.send(dbus)?;
     }
-    arduino_hal::delay_ms(50);
 
     // Step 8: Wait for EOT ACK
     {

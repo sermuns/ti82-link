@@ -1,6 +1,6 @@
 pub const MACHINE_ID_COMPUTER_TI82: u8 = 0x02;
 pub const MACHINE_ID_COMPUTER_TI83: u8 = 0x03;
-pub const MACHINE_ID_COMPUTER: u8 = MACHINE_ID_COMPUTER_TI83; // Use TI-83 for TI-82 Stats
+pub const MACHINE_ID_COMPUTER: u8 = MACHINE_ID_COMPUTER_TI83;
 pub const MACHINE_ID_TI82: u8 = 0x82;
 
 pub const CMD_VAR: u8 = 0x06;

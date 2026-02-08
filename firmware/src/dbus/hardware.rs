@@ -71,26 +71,6 @@ where
         Ok(())
     }
 
-    pub fn send_byte_with_debug<W>(&mut self, serial: &mut W, byte: u8) -> Result<(), DBusError>
-    where
-        W: ufmt::uWrite,
-    {
-        ufmt::uwriteln!(serial, "Sending byte: 0x{:02X} (bits LSB-first)", byte).ok();
-        for i in 0..8 {
-            let bit = (byte >> i) & 1 == 1;
-            ufmt::uwrite!(serial, "  Bit {}: {} ", i, bit as u8).ok();
-            match self.send_bit(bit) {
-                Ok(_) => ufmt::uwriteln!(serial, "OK").ok(),
-                Err(e) => {
-                    ufmt::uwriteln!(serial, "FAILED").ok();
-                    return Err(e);
-                }
-            };
-        }
-        ufmt::uwriteln!(serial, "All bits sent!").ok();
-        Ok(())
-    }
-
     pub fn receive_byte(&mut self, timeout_ms: u16) -> Result<u8, DBusError> {
         let mut byte = 0u8;
         for i in 0..8 {

@@ -1,12 +1,8 @@
 /// TI-82/83 variable encoding and decoding utilities
-///
-/// This module provides functions to encode/decode TI calculator variable formats.
-/// On the firmware side, we work with raw bytes to avoid floating point operations.
 use heapless::Vec;
 
 /// Decodes a TI real number (9 bytes) into mantissa and exponent components
 /// Returns (mantissa_digits, exponent, is_negative)
-/// where mantissa_digits is a 14-digit BCD representation
 pub fn decode_real_raw(bytes: &[u8]) -> Option<([u8; 14], i8, bool)> {
     if bytes.len() != 9 {
         return None;
@@ -15,7 +11,6 @@ pub fn decode_real_raw(bytes: &[u8]) -> Option<([u8; 14], i8, bool)> {
     let is_negative = bytes[0] & 0x80 != 0;
     let exponent = (bytes[1] as i16 - 0x80) as i8;
 
-    // Extract BCD mantissa digits
     let mut digits = [0u8; 14];
     for i in 0..7 {
         let digit_pair = bytes[2 + i];
@@ -27,7 +22,6 @@ pub fn decode_real_raw(bytes: &[u8]) -> Option<([u8; 14], i8, bool)> {
 }
 
 /// Encodes a TI real number from raw byte components
-/// Takes pre-encoded BCD bytes (7 bytes representing 14 BCD digits)
 pub fn encode_real_raw(bcd_mantissa: &[u8; 7], exponent: i8, is_negative: bool) -> [u8; 9] {
     let mut result = [0u8; 9];
 
@@ -38,8 +32,7 @@ pub fn encode_real_raw(bcd_mantissa: &[u8; 7], exponent: i8, is_negative: bool) 
     result
 }
 
-/// Helper function: Encode a simple integer value as a TI real number
-/// This is useful for testing and simple cases
+/// Encode an integer value as a TI real number
 pub fn encode_integer(value: i32) -> [u8; 9] {
     let mut result = [0u8; 9];
 
@@ -53,7 +46,6 @@ pub fn encode_integer(value: i32) -> [u8; 9] {
 
     result[0] = if is_negative { 0x80 } else { 0x00 };
 
-    // Calculate exponent (power of 10)
     let mut exp: i8 = 0;
     let mut temp = abs_value;
     while temp >= 10 {
@@ -63,17 +55,11 @@ pub fn encode_integer(value: i32) -> [u8; 9] {
 
     result[1] = (exp as i16 + 0x80) as u8;
 
-    // Convert to BCD mantissa
-    // TI format: most significant digits FIRST
-    // Example: 42 = 4.2 × 10^1 → mantissa starts with 4, 2
     let mut bcd = [0u8; 7];
-
-    // Convert number to decimal digits (most significant first)
     let mut digits = [0u8; 14];
     let mut temp = abs_value;
     let mut digit_count = 0;
 
-    // Extract digits into temporary array (least significant first)
     let mut temp_digits = [0u8; 14];
     for i in 0..14 {
         temp_digits[i] = (temp % 10) as u8;
@@ -83,13 +69,10 @@ pub fn encode_integer(value: i32) -> [u8; 9] {
         }
     }
 
-    // Reverse: copy from temp_digits (backwards) to digits (forwards)
     for i in 0..digit_count {
         digits[i] = temp_digits[digit_count - 1 - i];
     }
-    // Rest are already 0
 
-    // Pack into BCD bytes (2 digits per byte), most significant first
     for i in 0..7 {
         bcd[i] = (digits[i * 2] << 4) | digits[i * 2 + 1];
     }
