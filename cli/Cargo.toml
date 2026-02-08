@@ -1,0 +1,10 @@
+[package]
+name = "ti82-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+clap = { version = "4", features = ["derive", "color"] }
+serialport = "4"
+color-eyre = "0.6"

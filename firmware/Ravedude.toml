@@ -1,0 +1,5 @@
+[general]
+board = "nano-new"
+# open-console = true
+# serial-baudrate = 57600
+port = "/dev/ttyUSB0"
