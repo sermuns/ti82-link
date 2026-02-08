@@ -1,6 +1,6 @@
 # TI-82 Link
 
-Send variables to TI-82 Stats calculators via Arduino Nano.
+Bidirectional communication with TI-82 Stats calculators via Arduino Nano.
 
 ## Hardware
 
@@ -28,25 +28,38 @@ cargo run --release
 
 ## Usage
 
-**Send variable:**
+**Send variable to calculator:**
 ```bash
 cargo run -p ti82-cli -- send A 42
 cargo run -p ti82-cli -- send B -- -123  # negative numbers
 ```
 
-**Steps:**
+Steps:
 1. Put calculator in RECEIVE mode: `[2nd][LINK] → RECEIVE`
 2. Calculator shows "Waiting..."
 3. Run CLI command within 5 seconds
 4. Variable appears on calculator
+
+**Get variable from calculator:**
+```bash
+cargo run -p ti82-cli -- get A
+```
+
+Steps:
+1. Put calculator in SEND mode: `[2nd][LINK] → TRANSMIT → Real`
+2. Select variable (e.g., A)
+3. Calculator shows "Waiting..."
+4. Run CLI command within 5 seconds
+5. Value displays on PC
 
 **Note:** If variable exists, calculator shows overwrite prompt (10 minute timeout).
 
 ## What Works
 
 - Sending real numbers to variables A-Z
-- Values: integers, negatives, zero
-- Handles overwrite dialogs (60s timeout)
+- Receiving real numbers from variables A-Z
+- Values: integers, negatives, zero, decimals
+- Handles overwrite dialogs (10 minute timeout)
 
 ## License
 
