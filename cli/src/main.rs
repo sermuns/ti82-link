@@ -69,6 +69,10 @@ enum Commands {
         name: char,
     },
 
+    GetProgram {
+        name: String,
+    },
+
     Send {
         #[arg(value_parser = parse_var_name)]
         name: char,
@@ -196,6 +200,56 @@ fn main() -> Result<()> {
                     }
                     println!();
                 }
+            }
+
+            if cli.verbose {
+                println!("\n{}", response);
+            }
+        }
+        Commands::GetProgram { name } => {
+            // Send P + 8-byte program name (null-padded)
+            let mut cmd = vec![b'P'];
+            let name_bytes = name.as_bytes();
+            let len = name_bytes.len().min(8);
+            cmd.extend_from_slice(&name_bytes[..len]);
+            for _ in len..8 {
+                cmd.push(0);
+            }
+            port.write_all(&cmd)?;
+            port.flush()?;
+
+            let (response, data_bytes) = read_all_response(&mut port, cli.verbose)?;
+
+            if !data_bytes.is_empty() {
+                println!("Program '{}': {} bytes received", name, data_bytes.len());
+
+                // Display raw hex dump
+                print!("Hex dump: ");
+                for (i, byte) in data_bytes.iter().enumerate() {
+                    if i > 0 && i % 16 == 0 {
+                        println!();
+                        print!("          ");
+                    }
+                    print!("{:02X} ", byte);
+                }
+                println!();
+
+                // Display as ASCII where printable
+                print!("ASCII:    ");
+                for (i, byte) in data_bytes.iter().enumerate() {
+                    if i > 0 && i % 16 == 0 {
+                        println!();
+                        print!("          ");
+                    }
+                    if byte.is_ascii_graphic() || *byte == b' ' {
+                        print!(" {}  ", *byte as char);
+                    } else {
+                        print!(" .  ");
+                    }
+                }
+                println!();
+            } else {
+                println!("Program '{}': No data received", name);
             }
 
             if cli.verbose {

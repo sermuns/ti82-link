@@ -49,6 +49,24 @@ fn main() -> ! {
                     ufmt::uwriteln!(&mut serial, "ERROR\r").unwrap_infallible();
                 }
             }
+            b'P' => {
+                // Request program (receive FROM calculator)
+                let mut name_bytes = [0u8; 8];
+                for i in 0..8 {
+                    name_bytes[i] = nb::block!(serial.read()).unwrap_infallible();
+                    if name_bytes[i] == 0 {
+                        break;
+                    }
+                }
+
+                ufmt::uwriteln!(&mut serial, "Requesting program\r").unwrap_infallible();
+
+                if request_program(&mut dbus, &mut serial, &name_bytes).is_ok() {
+                    ufmt::uwriteln!(&mut serial, "OK\r").unwrap_infallible();
+                } else {
+                    ufmt::uwriteln!(&mut serial, "ERROR\r").unwrap_infallible();
+                }
+            }
             b'S' => {
                 // Status check
                 let (d0_state, d1_state) = dbus.get_pin_states();
@@ -149,6 +167,86 @@ where
         return Err(dbus::hardware::DBusError::LinkError);
     };
     ufmt::uwriteln!(serial, "Variable size: {} bytes\r", actual_header.data_size).ok();
+
+    ufmt::uwriteln!(serial, "Sending ACK...\r").ok();
+    let ack_packet = Packet::new(MACHINE_ID_COMPUTER, CMD_ACK);
+    ack_packet.send(dbus)?;
+
+    ufmt::uwriteln!(serial, "Sending CTS...\r").ok();
+    let cts_packet = Packet::new(MACHINE_ID_COMPUTER, CMD_CTS);
+    cts_packet.send(dbus)?;
+
+    ufmt::uwriteln!(serial, "Waiting for ACK...\r").ok();
+    let ack2 = Packet::receive(dbus, 5000)?;
+    if ack2.command_id != CMD_ACK {
+        ufmt::uwriteln!(serial, "Expected ACK, got: {:02X}\r", ack2.command_id).ok();
+        return Err(dbus::hardware::DBusError::LinkError);
+    }
+
+    ufmt::uwriteln!(serial, "Waiting for DATA...\r").ok();
+    let data_packet = Packet::receive(dbus, 5000)?;
+    if data_packet.command_id != CMD_DATA {
+        ufmt::uwriteln!(
+            serial,
+            "Expected DATA, got: {:02X}\r",
+            data_packet.command_id
+        )
+        .ok();
+        return Err(dbus::hardware::DBusError::LinkError);
+    }
+
+    ufmt::uwriteln!(serial, "Received {} bytes:\r", data_packet.data.len()).ok();
+    for (i, &byte) in data_packet.data.iter().enumerate() {
+        if i % 16 == 0 {
+            ufmt::uwrite!(serial, "\r").ok();
+        }
+        ufmt::uwrite!(serial, "{:02X} ", byte).ok();
+    }
+    ufmt::uwriteln!(serial, "\r").ok();
+
+    ufmt::uwriteln!(serial, "Sending final ACK...\r").ok();
+    let ack_final = Packet::new(MACHINE_ID_COMPUTER, CMD_ACK);
+    ack_final.send(dbus)?;
+
+    ufmt::uwriteln!(serial, "Transfer complete!\r").ok();
+
+    Ok(())
+}
+
+fn request_program<W, D0, D1>(
+    dbus: &mut DBus<D0, D1>,
+    serial: &mut W,
+    name_bytes: &[u8],
+) -> Result<(), dbus::hardware::DBusError>
+where
+    W: ufmt::uWrite,
+    D0: PinOps,
+    D1: PinOps,
+{
+    let var_header = VariableHeader::new_program(name_bytes, 0);
+    let req_packet = Packet::with_data(MACHINE_ID_COMPUTER, CMD_REQ, &var_header.to_bytes());
+
+    ufmt::uwriteln!(serial, "Sending REQ...\r").ok();
+    req_packet.send(dbus)?;
+
+    ufmt::uwriteln!(serial, "Waiting for ACK...\r").ok();
+    let ack1 = Packet::receive(dbus, 5000)?;
+    if ack1.command_id != CMD_ACK {
+        ufmt::uwriteln!(serial, "Expected ACK, got: {:02X}\r", ack1.command_id).ok();
+        return Err(dbus::hardware::DBusError::LinkError);
+    }
+
+    ufmt::uwriteln!(serial, "Waiting for VAR...\r").ok();
+    let var_packet = Packet::receive(dbus, 5000)?;
+    if var_packet.command_id != CMD_VAR {
+        ufmt::uwriteln!(serial, "Expected VAR, got: {:02X}\r", var_packet.command_id).ok();
+        return Err(dbus::hardware::DBusError::LinkError);
+    }
+
+    let Some(actual_header) = VariableHeader::from_bytes(&var_packet.data) else {
+        return Err(dbus::hardware::DBusError::LinkError);
+    };
+    ufmt::uwriteln!(serial, "Program size: {} bytes\r", actual_header.data_size).ok();
 
     ufmt::uwriteln!(serial, "Sending ACK...\r").ok();
     let ack_packet = Packet::new(MACHINE_ID_COMPUTER, CMD_ACK);
