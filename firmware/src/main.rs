@@ -67,6 +67,17 @@ fn main() -> ! {
                     ufmt::uwriteln!(&mut serial, "ERROR\r").unwrap_infallible();
                 }
             }
+            b'L' => {
+                // Listen/receive mode (receive FROM calculator in manual mode)
+                ufmt::uwriteln!(&mut serial, "Listening for incoming transfer...\r")
+                    .unwrap_infallible();
+
+                if receive_variable(&mut dbus, &mut serial).is_ok() {
+                    ufmt::uwriteln!(&mut serial, "OK\r").unwrap_infallible();
+                } else {
+                    ufmt::uwriteln!(&mut serial, "ERROR\r").unwrap_infallible();
+                }
+            }
             b'S' => {
                 // Status check
                 let (d0_state, d1_state) = dbus.get_pin_states();
@@ -197,8 +208,8 @@ where
 
     ufmt::uwriteln!(serial, "Received {} bytes:\r", data_packet.data.len()).ok();
     for (i, &byte) in data_packet.data.iter().enumerate() {
-        if i % 16 == 0 {
-            ufmt::uwrite!(serial, "\r").ok();
+        if i % 16 == 0 && i > 0 {
+            ufmt::uwriteln!(serial, "\r").ok();
         }
         ufmt::uwrite!(serial, "{:02X} ", byte).ok();
     }
@@ -277,8 +288,8 @@ where
 
     ufmt::uwriteln!(serial, "Received {} bytes:\r", data_packet.data.len()).ok();
     for (i, &byte) in data_packet.data.iter().enumerate() {
-        if i % 16 == 0 {
-            ufmt::uwrite!(serial, "\r").ok();
+        if i % 16 == 0 && i > 0 {
+            ufmt::uwriteln!(serial, "\r").ok();
         }
         ufmt::uwrite!(serial, "{:02X} ", byte).ok();
     }
@@ -378,6 +389,110 @@ where
             ufmt::uwriteln!(serial, "ERR: got {:02X}\r", ack_eot.command_id).ok();
             return Err(dbus::hardware::DBusError::LinkError);
         }
+    }
+
+    ufmt::uwriteln!(serial, "Transfer complete!\r").ok();
+
+    Ok(())
+}
+
+fn receive_variable<W, D0, D1>(
+    dbus: &mut DBus<D0, D1>,
+    serial: &mut W,
+) -> Result<(), dbus::hardware::DBusError>
+where
+    W: ufmt::uWrite,
+    D0: PinOps,
+    D1: PinOps,
+{
+    // Step 1: Wait for VAR packet from calculator
+    {
+        ufmt::uwriteln!(serial, "R1: Wait VAR\r").ok();
+        let var_packet = Packet::receive(dbus, 60000)?;
+        if var_packet.command_id != CMD_VAR {
+            ufmt::uwriteln!(
+                serial,
+                "ERR: expected VAR (0x06), got {:02X}\r",
+                var_packet.command_id
+            )
+            .ok();
+            return Err(dbus::hardware::DBusError::LinkError);
+        }
+
+        let Some(var_header) = VariableHeader::from_bytes(&var_packet.data) else {
+            ufmt::uwriteln!(serial, "ERR: invalid VAR header\r").ok();
+            return Err(dbus::hardware::DBusError::LinkError);
+        };
+
+        ufmt::uwriteln!(serial, "Type: {:02X}\r", var_header.type_id).ok();
+        ufmt::uwriteln!(serial, "Size: {} bytes\r", var_header.data_size).ok();
+        ufmt::uwrite!(serial, "Name: ").ok();
+        for &byte in var_header.name_str() {
+            ufmt::uwrite!(serial, "{}", byte as char).ok();
+        }
+        ufmt::uwriteln!(serial, "\r").ok();
+    }
+
+    {
+        ufmt::uwriteln!(serial, "R2: Send ACK\r").ok();
+        let ack1 = Packet::new(MACHINE_ID_COMPUTER, CMD_ACK);
+        ack1.send(dbus)?;
+    }
+
+    {
+        ufmt::uwriteln!(serial, "R3: Send CTS\r").ok();
+        let cts = Packet::new(MACHINE_ID_COMPUTER, CMD_CTS);
+        cts.send(dbus)?;
+    }
+
+    {
+        ufmt::uwriteln!(serial, "R4: Wait ACK\r").ok();
+        let ack2 = Packet::receive(dbus, 5000)?;
+        if ack2.command_id != CMD_ACK {
+            ufmt::uwriteln!(serial, "ERR: got {:02X}\r", ack2.command_id).ok();
+            return Err(dbus::hardware::DBusError::LinkError);
+        }
+    }
+
+    {
+        ufmt::uwriteln!(serial, "R5: Wait DATA\r").ok();
+        let data_packet = Packet::receive(dbus, 10000)?;
+        if data_packet.command_id != CMD_DATA {
+            ufmt::uwriteln!(serial, "ERR: got {:02X}\r", data_packet.command_id).ok();
+            return Err(dbus::hardware::DBusError::LinkError);
+        }
+
+        ufmt::uwriteln!(serial, "Received {} bytes:\r", data_packet.data.len()).ok();
+        arduino_hal::delay_ms(10);
+        for (i, &byte) in data_packet.data.iter().enumerate() {
+            if i % 16 == 0 && i > 0 {
+                ufmt::uwriteln!(serial, "\r").ok();
+                arduino_hal::delay_ms(5);
+            }
+            ufmt::uwrite!(serial, "{:02X} ", byte).ok();
+        }
+        ufmt::uwriteln!(serial, "\r").ok();
+    }
+
+    {
+        ufmt::uwriteln!(serial, "R6: Send ACK\r").ok();
+        let ack3 = Packet::new(MACHINE_ID_COMPUTER, CMD_ACK);
+        ack3.send(dbus)?;
+    }
+
+    {
+        ufmt::uwriteln!(serial, "R7: Wait EOT\r").ok();
+        let eot = Packet::receive(dbus, 5000)?;
+        if eot.command_id != CMD_EOT {
+            ufmt::uwriteln!(serial, "ERR: got {:02X}\r", eot.command_id).ok();
+            return Err(dbus::hardware::DBusError::LinkError);
+        }
+    }
+
+    {
+        ufmt::uwriteln!(serial, "R8: Send ACK\r").ok();
+        let ack_final = Packet::new(MACHINE_ID_COMPUTER, CMD_ACK);
+        ack_final.send(dbus)?;
     }
 
     ufmt::uwriteln!(serial, "Transfer complete!\r").ok();

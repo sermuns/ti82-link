@@ -1,7 +1,14 @@
+#![allow(unused)]
+
 use clap::{Parser, Subcommand};
-use color_eyre::Result;
+use color_eyre::{
+    Result,
+    eyre::{Context, eyre},
+};
 use serialport::SerialPort;
 use std::time::Duration;
+
+mod tokens;
 
 fn parse_ti82_real(bytes: &[u8]) -> Option<f64> {
     if bytes.len() != 9 {
@@ -73,6 +80,9 @@ enum Commands {
         name: String,
     },
 
+    /// Receive/listen mode - waits for calculator to send a variable
+    Receive,
+
     Send {
         #[arg(value_parser = parse_var_name)]
         name: char,
@@ -99,7 +109,8 @@ fn main() -> Result<()> {
 
     let mut port = serialport::new(&cli.port, cli.baud)
         .timeout(Duration::from_millis(100))
-        .open()?;
+        .open()
+        .wrap_err_with(|| eyre!("port `{}` not found, is it connected?", &cli.port))?;
 
     if cli.verbose {
         eprintln!("Waiting for Arduino to boot...");
@@ -115,7 +126,7 @@ fn main() -> Result<()> {
         Commands::Status => {
             send_command(&mut port, b"S")?;
             let response = read_response(&mut port)?;
-            println!("{}", response);
+            println!("{response}");
         }
         Commands::Test => {
             send_command(&mut port, b"T")?;
@@ -127,7 +138,7 @@ fn main() -> Result<()> {
                 if port.read_exact(&mut byte).is_ok() {
                     if byte[0] == b'\r' || byte[0] == b'\n' {
                         if !buffer.is_empty() {
-                            println!("{}", buffer);
+                            println!("{buffer}");
                             buffer.clear();
                         }
                     } else {
@@ -146,7 +157,7 @@ fn main() -> Result<()> {
                 if port.read_exact(&mut byte).is_ok() {
                     if byte[0] == b'\r' || byte[0] == b'\n' {
                         if !buffer.is_empty() {
-                            println!("{}", buffer);
+                            println!("{buffer}");
                             buffer.clear();
                         }
                     } else {
@@ -167,7 +178,7 @@ fn main() -> Result<()> {
                 if port.read_exact(&mut byte).is_ok() {
                     if byte[0] == b'\r' || byte[0] == b'\n' {
                         if !buffer.is_empty() {
-                            println!("{}", buffer);
+                            println!("{buffer}");
                             buffer.clear();
                         }
                     } else {
@@ -184,7 +195,7 @@ fn main() -> Result<()> {
 
             if !data_bytes.is_empty() {
                 if let Some(value) = parse_ti82_real(&data_bytes) {
-                    println!("Variable {}: {}", name, value);
+                    println!("Variable {name}: {value}");
                 } else {
                     println!(
                         "Variable {}: [couldn't parse {} bytes]",
@@ -196,14 +207,14 @@ fn main() -> Result<()> {
                 if cli.verbose {
                     print!("Raw bytes: ");
                     for byte in &data_bytes {
-                        print!("{:02X} ", byte);
+                        print!("{byte:02X} ");
                     }
                     println!();
                 }
             }
 
             if cli.verbose {
-                println!("\n{}", response);
+                println!("\n{response}");
             }
         }
         Commands::GetProgram { name } => {
@@ -230,7 +241,7 @@ fn main() -> Result<()> {
                         println!();
                         print!("          ");
                     }
-                    print!("{:02X} ", byte);
+                    print!("{byte:02X} ");
                 }
                 println!();
 
@@ -249,11 +260,86 @@ fn main() -> Result<()> {
                 }
                 println!();
             } else {
-                println!("Program '{}': No data received", name);
+                println!("Program '{name}': No data received");
             }
 
             if cli.verbose {
-                println!("\n{}", response);
+                println!("\n{response}");
+            }
+        }
+        Commands::Receive => {
+            // Send L command to enter listen/receive mode
+            port.write_all(b"L")?;
+            port.flush()?;
+
+            println!("Listening for incoming transfer from calculator...");
+            println!("On calculator: Press [2nd] [LINK] → SEND → Select variable");
+            println!();
+
+            let (response, data_bytes) = read_all_response(&mut port, cli.verbose)?;
+
+            // Parse the response to extract variable type and name
+            let mut var_type = None;
+            let mut var_name = String::new();
+            for line in response.lines() {
+                if line.starts_with("Type: ") {
+                    if let Some(hex) = line.strip_prefix("Type: ") {
+                        if let Ok(type_id) = u8::from_str_radix(hex.trim(), 16) {
+                            var_type = Some(type_id);
+                        }
+                    }
+                    // Print the type line
+                    println!("{line}");
+                }
+                if line.starts_with("Name: ") {
+                    var_name = line.strip_prefix("Name: ").unwrap_or("").to_string();
+                    // Print the name line
+                    println!("{line}");
+                }
+                if line.starts_with("Size: ") {
+                    // Print the size line
+                    println!("{line}");
+                }
+            }
+
+            if !data_bytes.is_empty() {
+                // Check if it's a program (type 0x05 or 0x06)
+                if matches!(var_type, Some(0x05) | Some(0x06)) {
+                    println!("\n=== Program Content ===");
+                    let decoder = tokens::TokenDecoder::new();
+                    if let Some(decoded) = decoder.decode_program(&data_bytes) {
+                        // Split by newlines for better readability
+                        for line in decoded.split('\n') {
+                            println!("{line}");
+                        }
+                    } else {
+                        println!("Error: Could not decode program data");
+                    }
+                    println!("======================\n");
+                } else {
+                    // For non-program data, show raw dump
+                    println!();
+                }
+
+                // Always show hex dump if verbose or non-program
+                if cli.verbose || !matches!(var_type, Some(0x05) | Some(0x06)) {
+                    print!("Hex dump: ");
+                    for (i, byte) in data_bytes.iter().enumerate() {
+                        if i > 0 && i % 16 == 0 {
+                            println!();
+                            print!("          ");
+                        }
+                        print!("{byte:02X} ");
+                    }
+                    println!();
+                }
+            } else {
+                println!("No data received");
+            }
+
+            if cli.verbose {
+                println!("\n=== Full Debug Output ===");
+                println!("{response}");
             }
         }
         Commands::Send { name, value } => {
@@ -275,7 +361,7 @@ fn main() -> Result<()> {
                     last_output = std::time::Instant::now();
                     if byte[0] == b'\r' || byte[0] == b'\n' {
                         if !buffer.is_empty() {
-                            println!("{}", buffer);
+                            println!("{buffer}");
                             if buffer.contains("OK") || buffer.contains("ERROR") {
                                 break;
                             }
@@ -286,14 +372,14 @@ fn main() -> Result<()> {
                     }
                 } else if last_output.elapsed() > Duration::from_secs(2) && !buffer.is_empty() {
                     // Print partial buffer if no output for 2 seconds
-                    println!("{}", buffer);
+                    println!("{buffer}");
                     break;
                 }
             }
 
             // Print any remaining buffer
             if !buffer.is_empty() {
-                println!("{}", buffer);
+                println!("{buffer}");
             }
         }
     }
@@ -336,7 +422,7 @@ fn read_all_response(port: &mut Box<dyn SerialPort>, verbose: bool) -> Result<(S
     let mut lines = Vec::new();
     let mut data_bytes = Vec::new();
     let start = Instant::now();
-    let max_wait = Duration::from_secs(30);
+    let max_wait = Duration::from_secs(60);
     let mut last_activity = Instant::now();
     let mut in_hex_dump = false;
     let mut started = false;
@@ -344,7 +430,7 @@ fn read_all_response(port: &mut Box<dyn SerialPort>, verbose: bool) -> Result<(S
     loop {
         if start.elapsed() > max_wait {
             if verbose {
-                eprintln!("Timeout after 30 seconds");
+                eprintln!("Timeout after 60 seconds");
             }
             break;
         }
@@ -360,27 +446,36 @@ fn read_all_response(port: &mut Box<dyn SerialPort>, verbose: bool) -> Result<(S
 
                     let line = String::from_utf8_lossy(&buffer).to_string();
 
-                    if !started && line.contains("Requesting variable") {
+                    if !started
+                        && (line.contains("Requesting variable")
+                            || line.contains("Listening for incoming transfer"))
+                    {
                         started = true;
                     }
 
                     if started {
                         if verbose {
-                            eprintln!("← {}", line);
+                            eprintln!("← {line}");
                         }
 
                         if line.contains("Received") && line.contains("bytes:") {
                             in_hex_dump = true;
                         } else if in_hex_dump {
-                            for token in line.split_whitespace() {
-                                if let Ok(val) = u8::from_str_radix(token, 16) {
-                                    data_bytes.push(val);
-                                }
-                            }
-                            if line.trim().is_empty()
-                                || !line.chars().any(|c| c.is_ascii_hexdigit())
+                            // Stop hex dump parsing if we hit a protocol message or status line
+                            if line.starts_with("R")
+                                || line.starts_with("S")
+                                || line.contains("Transfer complete")
+                                || line.contains("OK")
+                                || line.contains("ERROR")
                             {
                                 in_hex_dump = false;
+                            } else {
+                                // Parse all hex tokens from this line (skip non-hex content)
+                                for token in line.split_whitespace() {
+                                    if let Ok(val) = u8::from_str_radix(token, 16) {
+                                        data_bytes.push(val);
+                                    }
+                                }
                             }
                         }
 
@@ -390,7 +485,7 @@ fn read_all_response(port: &mut Box<dyn SerialPort>, verbose: bool) -> Result<(S
                             break;
                         }
                     } else if verbose {
-                        eprintln!("← {} [skipped]", line);
+                        eprintln!("← {line} [skipped]");
                     }
 
                     buffer.clear();
@@ -400,7 +495,7 @@ fn read_all_response(port: &mut Box<dyn SerialPort>, verbose: bool) -> Result<(S
                 buffer.push(byte[0]);
             }
             Err(_) => {
-                if started && last_activity.elapsed() > Duration::from_secs(2) && !lines.is_empty()
+                if started && last_activity.elapsed() > Duration::from_secs(65) && !lines.is_empty()
                 {
                     break;
                 }
